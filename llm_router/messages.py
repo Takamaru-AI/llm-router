@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 ALLOWED_MESSAGE_KEYS = {
     "content",
     "name",
@@ -23,6 +22,9 @@ def normalize_messages(messages: list[Any]) -> list[Any]:
         clean = {
             key: value for key, value in message.items() if key in ALLOWED_MESSAGE_KEYS
         }
+        if isinstance(clean.get("content"), list):
+            clean["content"] = _flatten_content(clean["content"])
+
         has_content = _has_content(clean.get("content"))
         if (
             clean.get("role") == "assistant"
@@ -50,6 +52,20 @@ def is_valid_completion(data: dict[str, Any]) -> bool:
         (_has_content(message.get("content")) or bool(message.get("tool_calls")))
         and choice.get("finish_reason") != "content_filter"
     )
+
+
+def _flatten_content(content: list[Any]) -> str:
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict):
+            if item.get("type") == "text":
+                text = item.get("text")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+        elif isinstance(item, str):
+            parts.append(item)
+
+    return "\n".join(parts)
 
 
 def _has_content(content: Any) -> bool:

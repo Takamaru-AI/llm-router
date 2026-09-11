@@ -1,4 +1,7 @@
-class RoutedModelRegistry:
+from __future__ import annotations
+
+
+class State:
     def __init__(self) -> None:
         self._model: str | None = None
 

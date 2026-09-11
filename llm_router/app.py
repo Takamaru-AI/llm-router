@@ -1,35 +1,39 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from .backend import BackendClient
+from .backend import BackendClient, BackendError
 from .config import RouterConfig
 from .messages import normalize_messages
 from .router import ModelRouter
-from .state import RoutedModelRegistry
-
+from .state import State
 
 ROUTED_MODEL_HEADER = "x-routed-model"
 SWITCHED_BACKEND_HEADER = "x-router-is_switched"
 
 
 def create_app(config: RouterConfig) -> FastAPI:
-    app = FastAPI(title="LLM Router")
-    state = RoutedModelRegistry()
     backend_client = BackendClient()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            await backend_client.close()
+
+    app = FastAPI(title="LLM Router", lifespan=lifespan)
+    state = State()
     model_router = ModelRouter(
         config,
         backend_client,
         state,
     )
-
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        await backend_client.close()
 
     @app.post("/v1/chat/completions")
     async def route_chat_completions(request: Request) -> Response:
@@ -52,7 +56,15 @@ def create_app(config: RouterConfig) -> FastAPI:
         requested_model = str(
             body.get("model", config.default_model)
         ).strip().lower()
-        routed = await model_router.route(body, requested_model)
+        try:
+            routed = await model_router.route(body, requested_model)
+        except BackendError as error:
+            return Response(
+                content=error.body,
+                status_code=error.status_code,
+                media_type="application/json",
+            )
+
         if routed is None:
             return _unavailable_response(config, requested_model)
 

@@ -4,14 +4,17 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
+
 from .backend import BackendClient
 from .config import (
     EndpointConfig,
     PresetConfig,
+    PresetModelConfig,
     PresetRouteConfig,
     RouterConfig,
 )
-from .state import RoutedModelRegistry
+from .state import State
 
 
 class ModelRouter:
@@ -19,7 +22,7 @@ class ModelRouter:
         self,
         config: RouterConfig,
         backend_client: BackendClient,
-        state: RoutedModelRegistry,
+        state: State,
     ) -> None:
         self._config = config
         self._backend_client = backend_client
@@ -89,12 +92,13 @@ class ModelRouter:
 
         if endpoint.id is None:
             return await self._try_preset_local_route(
-                body, endpoint, route, is_fallback
+                body,
+                endpoint,
+                route,
+                is_fallback,
             )
 
-        return await self._try_preset_remote_route(
-            body, endpoint, route, is_fallback
-        )
+        return await self._try_preset_remote_route(body, endpoint, route, is_fallback)
 
     async def _try_preset_local_route(
         self,
@@ -131,7 +135,11 @@ class ModelRouter:
 
         if attempt_timeout is not None and len(models) > 1:
             return await self._try_models_with_attempt_timeout(
-                body, endpoint, models, is_fallback, attempt_timeout
+                body,
+                endpoint,
+                models,
+                is_fallback,
+                attempt_timeout,
             )
 
         for index, preset_model in enumerate(models):
@@ -154,7 +162,7 @@ class ModelRouter:
         self,
         body: dict[str, Any],
         endpoint: EndpointConfig,
-        models: tuple,
+        models: tuple[PresetModelConfig, ...],
         is_fallback: bool,
         fast_fail_timeout: float,
     ) -> tuple[dict[str, Any] | AsyncIterator[bytes], str, bool] | None:
@@ -188,7 +196,6 @@ class ModelRouter:
                 )
             except asyncio.TimeoutError:
                 continue
-
             except (httpx.HTTPError, OSError):
                 continue
 

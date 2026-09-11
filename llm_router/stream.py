@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import json
+from collections.abc import AsyncIterator
 
 import httpx
-
 
 SSE_CLEAN_STOP = (
     b"data: {\"id\":\"router-stream-stop\",\"object\":\"chat.completion.chunk\","
@@ -31,7 +30,7 @@ class ValidatedStream:
         except (StopAsyncIteration, httpx.HTTPError) as exception:
             await self._close()
 
-            print(f"WARNING: {self._label} stream failed before output: {exception}")
+            print(f"[WARNING] {self._label} stream failed before output: {exception}")
 
             return None
 
@@ -45,18 +44,19 @@ class ValidatedStream:
         is_done = False
         try:
             for line in buffered:
-                yield f"{line}\n".encode("utf-8")
+                yield f"{line}\n".encode()
             async for line in lines:
                 _, is_done = _parse_sse_line(line)
 
-                yield f"{line}\n".encode("utf-8")
+                yield f"{line}\n".encode()
         except httpx.HTTPError as exception:
-            print(f"WARNING: {self._label} stream failed after output: {exception}")
+            print(f"[WARNING] {self._label} stream failed after output: {exception}")
         finally:
             if not is_done:
                 yield SSE_CLEAN_STOP
 
                 yield SSE_DONE
+
             await self._close()
 
     async def _close(self) -> None:

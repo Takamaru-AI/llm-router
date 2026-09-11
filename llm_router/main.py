@@ -14,7 +14,7 @@ def run() -> None:
     try:
         config = ConfigLoader().load(arguments.config)
     except ConfigError as exception:
-        raise SystemExit(f"Configuration error: {exception}") from exception
+        raise SystemExit(f"[ERROR] Configuration error: {exception}") from exception
 
     uvicorn.run(create_app(config), host=config.server.host, port=config.server.port)
 
