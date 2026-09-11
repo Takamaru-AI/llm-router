@@ -10,6 +10,19 @@ from .config import EndpointConfig
 from .messages import is_valid_completion
 from .stream import ValidatedStream
 
+UNSUPPORTED_PARAMETERS = frozenset({
+    "reasoning",
+    "store",
+    "metadata",
+    "user",
+    "stream_options",
+    "service_tier",
+    "prediction",
+    "include",
+    "stream_id",
+    "session_id",
+})
+
 
 class BackendClient:
     def __init__(self) -> None:
@@ -39,7 +52,7 @@ class BackendClient:
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError) as exception:
-            print(f"INFO: Local health probe failed: {exception}")
+            print(f"[INFO] Local health probe failed: {exception}")
 
             return None
 
@@ -94,7 +107,7 @@ class BackendClient:
         credential = os.getenv(environment_variable, "").strip()
         if not credential:
             print(
-                f"WARNING: {endpoint.id or 'local'} credential "
+                f"[WARNING] {endpoint.id or 'local'} credential "
                 "environment variable is not configured"
             )
 
@@ -118,7 +131,12 @@ class BackendClient:
         body: dict[str, Any],
     ) -> dict[str, Any] | AsyncIterator[bytes] | None:
         url = f"{endpoint.openai_base_url}/chat/completions"
-        payload = {**body, "model": model}
+        payload = {
+            key: value
+            for key, value in body.items()
+            if key not in UNSUPPORTED_PARAMETERS
+        }
+        payload["model"] = model
         timeout = httpx.Timeout(
             connect=connect_timeout,
             pool=connect_timeout,
@@ -127,11 +145,21 @@ class BackendClient:
         )
         if bool(payload.get("stream")):
             return await self._request_stream(
-                label, url, headers, timeout, payload, endpoint
+                label,
+                url,
+                headers,
+                timeout,
+                payload,
+                endpoint,
             )
 
         return await self._request_completion(
-            label, url, headers, timeout, payload, endpoint
+            label,
+            url,
+            headers,
+            timeout,
+            payload,
+            endpoint,
         )
 
     async def _request_stream(
@@ -154,12 +182,13 @@ class BackendClient:
             )
             response = await client.send(request, stream=True)
         except httpx.HTTPError as exception:
-            print(f"WARNING: {label} request failed: {exception}")
+            print(f"[WARNING] {label} request failed: {exception}")
 
             return None
 
         if response.is_error:
-            print(f"WARNING: {label} returned HTTP {response.status_code}")
+            body = await response.aread()
+            print(f"[WARNING] {label} returned HTTP {response.status_code}: {body!r}")
 
             await response.aclose()
 
@@ -187,12 +216,12 @@ class BackendClient:
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError) as exception:
-            print(f"WARNING: {label} request failed: {exception}")
+            print(f"[WARNING] {label} request failed: {exception}")
 
             return None
 
         if not isinstance(data, dict) or not is_valid_completion(data):
-            print(f"WARNING: {label} returned an invalid completion")
+            print(f"[WARNING] {label} returned an invalid completion")
 
             return None
 

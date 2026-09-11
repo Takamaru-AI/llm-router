@@ -1,190 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 import yaml
 
-
-DEFAULT_CONTEXT_LENGTH: Final[int] = 65536
-
-
-class ConfigError(ValueError):
-    pass
-
-
-@dataclass(frozen=True)
-class ModelConfig:
-    id: str
-    display_name: str
-    context_length: int
-
-
-@dataclass(frozen=True)
-class AuthenticationConfig:
-    type: str = "none"
-    environment_variable: str | None = None
-    header_name: str | None = None
-
-
-@dataclass(frozen=True)
-class EndpointConfig:
-    id: str | None = None
-    openai_base_url: str = ""
-    authentication: AuthenticationConfig = field(default_factory=AuthenticationConfig)
-    connect_timeout_seconds: float = 10.0
-    read_timeout_seconds: float = 300.0
-    attempt_timeout_seconds: float | None = None
-    health_check_timeout_seconds: float = 3.0
-    models: tuple[ModelConfig, ...] = ()
-
-
-@dataclass(frozen=True)
-class ServerConfig:
-    host: str
-    port: int
-
-
-@dataclass(frozen=True)
-class PresetModelConfig:
-    id: str
-    priority: int
-
-
-@dataclass(frozen=True)
-class PresetRouteConfig:
-    endpoint_id: str | None
-    priority: int
-    models: tuple[PresetModelConfig, ...]
-
-
-@dataclass(frozen=True)
-class PresetConfig:
-    id: str
-    display_name: str
-    system_prompt: str | None
-    routes: tuple[PresetRouteConfig, ...]
-
-
-@dataclass(frozen=True)
-class RouterConfig:
-    server: ServerConfig
-    endpoints: tuple[EndpointConfig, ...]
-    global_system_prompt: str | None
-    default_model: str
-    presets: tuple[PresetConfig, ...]
-
-    def find_endpoint(self, endpoint_id: str | None) -> EndpointConfig | None:
-        return next(
-            (endpoint for endpoint in self.endpoints if endpoint.id == endpoint_id),
-            None,
-        )
-
-    def find_endpoint_for_model(
-        self,
-        model_id: str,
-    ) -> tuple[EndpointConfig, ModelConfig] | None:
-        for endpoint in self.endpoints:
-            model = next(
-                (
-                    candidate
-                    for candidate in endpoint.models
-                    if candidate.id == model_id
-                ),
-                None,
-            )
-            if model is not None:
-                return endpoint, model
-
-        return None
-
-    def endpoint_models(self) -> tuple[ModelConfig, ...]:
-        return tuple(
-            model
-            for endpoint in self.endpoints
-            for model in endpoint.models
-        )
-
-    def find_preset(self, preset_id: str) -> PresetConfig | None:
-        return next(
-            (preset for preset in self.presets if preset.id == preset_id),
-            None,
-        )
-
-    @property
-    def local_models(self) -> tuple[ModelConfig, ...]:
-        local_endpoint = next(
-            (e for e in self.endpoints if e.id is None),
-            None,
-        )
-
-        return local_endpoint.models if local_endpoint else ()
-
-    def remote_models(self) -> tuple[ModelConfig, ...]:
-        return tuple(
-            model
-            for endpoint in self.endpoints
-            if endpoint.id is not None
-            for model in endpoint.models
-        )
-
-    def find_remote_model(self, model_id: str) -> ModelConfig | None:
-        for endpoint in self.endpoints:
-            if endpoint.id is not None:
-                for model in endpoint.models:
-                    if model.id == model_id:
-                        return model
-
-        return None
-
-    def find_local_model(self, model_id: str) -> ModelConfig | None:
-        for endpoint in self.endpoints:
-            if endpoint.id is None:
-                for model in endpoint.models:
-                    if model.id == model_id:
-                        return model
-
-        return None
-
-    def ordered_routes(self, preset: PresetConfig) -> tuple[PresetRouteConfig, ...]:
-        return tuple(
-            sorted(preset.routes, key=lambda route: route.priority, reverse=True)
-        )
-
-    def ordered_route_models(
-        self,
-        route: PresetRouteConfig,
-    ) -> tuple[PresetModelConfig, ...]:
-        return tuple(
-            sorted(route.models, key=lambda model: model.priority, reverse=True)
-        )
-
-    def display_name_for(self, model_id: str) -> str:
-        entry = self.find_endpoint_for_model(model_id)
-        return entry[1].display_name if entry is not None else model_id
-
-    def context_length_for(self, model_id: str | None) -> int:
-        if model_id is None:
-            return DEFAULT_CONTEXT_LENGTH
-
-        entry = self.find_endpoint_for_model(model_id)
-
-        return entry[1].context_length if entry is not None else DEFAULT_CONTEXT_LENGTH
-
-    def system_prompt_for(self, requested_model: str) -> str | None:
-        preset = self.find_preset(requested_model)
-        if preset is not None and preset.system_prompt is not None:
-            return preset.system_prompt
-
-        return self.global_system_prompt
-
-    def preset_context_length(self, preset: PresetConfig) -> int:
-        return max(
-            self.context_length_for(model.id)
-            for route in preset.routes
-            for model in route.models
-        )
+from .authentication_config import AuthenticationConfig
+from .config_error import ConfigError
+from .endpoint_config import EndpointConfig
+from .model_config import ModelConfig
+from .preset_config import PresetConfig
+from .preset_model_config import PresetModelConfig
+from .preset_route_config import PresetRouteConfig
+from .router_config import RouterConfig
+from .server_config import ServerConfig
 
 
 class ConfigLoader:
@@ -260,25 +89,6 @@ class ConfigLoader:
             self._endpoint(self._item_mapping(item))
             for item in self._sequence(document, "remote_endpoints")
         )
-
-    def _endpoints(self, items: list[Any]) -> tuple[EndpointConfig, ...]:
-        endpoints = tuple(self._endpoint(self._item_mapping(item)) for item in items)
-        if not endpoints:
-            raise ConfigError("endpoints cannot be empty")
-
-        endpoint_ids = [endpoint.id for endpoint in endpoints]
-        if len(set(endpoint_ids)) != len(endpoints):
-            raise ConfigError("Each endpoint id must be unique")
-
-        all_model_ids = [
-            model.id
-            for endpoint in endpoints
-            for model in endpoint.models
-        ]
-        if len(set(all_model_ids)) != len(all_model_ids):
-            raise ConfigError("Model ids must be unique across endpoints")
-
-        return endpoints
 
     def _endpoint(self, data: dict[str, Any]) -> EndpointConfig:
         authentication_data = data.get("authentication")
@@ -372,19 +182,8 @@ class ConfigLoader:
                 if unknown:
                     raise ConfigError(
                         f"Preset route in {preset.id} references unknown model(s): "
-                        f"{", ".join(sorted(unknown))}"
+                        f"{', '.join(sorted(unknown))}"
                     )
-
-    def _validate_model_ids(
-        self,
-        endpoints: tuple[EndpointConfig, ...],
-        presets: tuple[PresetConfig, ...],
-    ) -> None:
-        base_model_ids = {
-            model.id for endpoint in endpoints for model in endpoint.models
-        }
-        if base_model_ids & {preset.id for preset in presets}:
-            raise ConfigError("Preset ids cannot match base model ids")
 
     def _presets(self, items: list[Any]) -> tuple[PresetConfig, ...]:
         presets = tuple(self._preset(self._item_mapping(item)) for item in items)
