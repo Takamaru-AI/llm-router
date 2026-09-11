@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from .backend import BackendClient
+from .backend import BackendClient, BackendError
 from .config import RouterConfig
 from .messages import normalize_messages
 from .router import ModelRouter
@@ -56,7 +56,15 @@ def create_app(config: RouterConfig) -> FastAPI:
         requested_model = str(
             body.get("model", config.default_model)
         ).strip().lower()
-        routed = await model_router.route(body, requested_model)
+        try:
+            routed = await model_router.route(body, requested_model)
+        except BackendError as error:
+            return Response(
+                content=error.body,
+                status_code=error.status_code,
+                media_type="application/json",
+            )
+
         if routed is None:
             return _unavailable_response(config, requested_model)
 

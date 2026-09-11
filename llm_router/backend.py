@@ -24,6 +24,13 @@ UNSUPPORTED_PARAMETERS = frozenset({
 })
 
 
+class BackendError(Exception):
+    def __init__(self, status_code: int, body: bytes) -> None:
+        self.status_code = status_code
+        self.body = body
+        super().__init__(f"Backend returned HTTP {status_code}")
+
+
 class BackendClient:
     def __init__(self) -> None:
         self._clients: dict[str, httpx.AsyncClient] = {}
@@ -188,9 +195,11 @@ class BackendClient:
 
         if response.is_error:
             body = await response.aread()
-            print(f"[WARNING] {label} returned HTTP {response.status_code}: {body!r}")
-
             await response.aclose()
+            if 400 <= response.status_code < 500:
+                raise BackendError(response.status_code, body)
+
+            print(f"[WARNING] {label} returned HTTP {response.status_code}: {body!r}")
 
             return None
 
@@ -215,6 +224,18 @@ class BackendClient:
             )
             response.raise_for_status()
             data = response.json()
+        except httpx.HTTPStatusError as exception:
+            if 400 <= exception.response.status_code < 500:
+                error_body = await exception.response.aread()
+                await exception.response.aclose()
+                raise BackendError(
+                    exception.response.status_code,
+                    error_body,
+                ) from exception
+
+            print(f"[WARNING] {label} request failed: {exception}")
+
+            return None
         except (httpx.HTTPError, ValueError) as exception:
             print(f"[WARNING] {label} request failed: {exception}")
 
