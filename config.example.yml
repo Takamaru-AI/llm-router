@@ -76,6 +76,26 @@ presets:
           - id: "nvidia/nemotron-nano-12b-v2-vl"
             priority: 95
 
+  - id: "remote"
+    display_name: "Remote"
+    routes:
+      - target: "remote"
+        endpoint_id: "cloudflare-workers"
+        priority: 99
+        models:
+          - id: "@cf/qwen/qwen3.8-27b"
+            priority: 99
+      - target: "remote"
+        endpoint_id: "nvidia-nim"
+        priority: 98
+        models:
+          - id: "meta/muse-glimmer-30b"
+            priority: 99
+          - id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+            priority: 94
+          - id: "nvidia/nemotron-nano-12b-v2-vl"
+            priority: 93
+
   - id: "remote-multimodal"
     display_name: "Remote Multimodal"
     system_prompt: ""
@@ -97,26 +117,6 @@ presets:
           - id: "nvidia/nemotron-nano-12b-v2-vl"
             priority: 95
 
-  - id: "remote"
-    display_name: "Remote"
-    routes:
-      - target: "remote"
-        endpoint_id: "cloudflare-workers"
-        priority: 99
-        models:
-          - id: "@cf/qwen/qwen3.8-27b"
-            priority: 99
-      - target: "remote"
-        endpoint_id: "nvidia-nim"
-        priority: 98
-        models:
-          - id: "meta/muse-glimmer-30b"
-            priority: 99
-          - id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
-            priority: 94
-          - id: "nvidia/nemotron-nano-12b-v2-vl"
-            priority: 93
-
   - id: "local"
     display_name: "Local"
     routes:
@@ -132,7 +132,7 @@ presets:
 
 remote_endpoints:
   - id: "cloudflare-workers"
-    openai_base_url: "https://api.cloudflare.com/client/v4/accounts/a2a79f87e0a4d36c617633fe54b8f611/ai/v1"
+    openai_base_url: "https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1"
     authentication:
       type: "bearer"
       environment_variable: "CLOUDFLARE_API_TOKEN"
