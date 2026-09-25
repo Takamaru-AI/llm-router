@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .backend import BackendClient
+from .backend import BackendClient, BackendError
 from .config import (
     EndpointConfig,
     PresetConfig,
@@ -67,16 +67,31 @@ class ModelRouter:
         preset: PresetConfig,
     ) -> tuple[dict[str, Any] | AsyncIterator[bytes], str, bool] | None:
         is_fallback = False
+        last_error: BackendError | None = None
         for route in self._config.ordered_routes(preset):
-            successful_result = await self._try_preset_route(
-                body,
-                route,
-                is_fallback,
-            )
+            try:
+                successful_result = await self._try_preset_route(
+                    body,
+                    route,
+                    is_fallback,
+                )
+            except BackendError as error:
+                print(
+                    f"[WARNING] {route.endpoint_id or 'local'} "
+                    f"returned HTTP {error.status_code}, trying next route"
+                )
+                last_error = error
+                is_fallback = True
+
+                continue
+
             if successful_result is not None:
                 return successful_result
 
             is_fallback = True
+
+        if last_error is not None:
+            raise last_error
 
         return None
 
@@ -142,12 +157,26 @@ class ModelRouter:
                 attempt_timeout,
             )
 
+        last_error: BackendError | None = None
         for index, preset_model in enumerate(models):
-            result = await self._backend_client.request_endpoint(
-                endpoint,
-                preset_model.id,
-                body,
-            )
+            try:
+                result = await self._backend_client.request_endpoint(
+                    endpoint,
+                    preset_model.id,
+                    body,
+                )
+            except BackendError as error:
+                print(
+                    f"[WARNING] {endpoint.id or 'local'} {preset_model.id} "
+                    f"returned HTTP {error.status_code}, trying next model"
+                )
+                if index == len(models) - 1:
+                    raise
+
+                last_error = error
+
+                continue
+
             successful_result = self._success(
                 result,
                 preset_model.id,
@@ -155,6 +184,9 @@ class ModelRouter:
             )
             if successful_result is not None:
                 return successful_result
+
+        if last_error is not None:
+            raise last_error
 
         return None
 
@@ -195,6 +227,13 @@ class ModelRouter:
                     timeout=fast_fail_timeout,
                 )
             except asyncio.TimeoutError:
+                continue
+            except BackendError as error:
+                print(
+                    f"[WARNING] {endpoint.id or 'local'} {primary_model.id} "
+                    f"returned HTTP {error.status_code}, trying next model"
+                )
+
                 continue
             except (httpx.HTTPError, OSError):
                 continue
